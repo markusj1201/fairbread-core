@@ -30,7 +30,7 @@
 #include <assert.h>
 #include <pthread.h>
 
-#define BITCOIN_PRIVKEY      128
+#define BITCOIN_PRIVKEY      223
 #define BITCOIN_PRIVKEY_TEST 239
 
 #if __BIG_ENDIAN__ || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) ||\
@@ -146,7 +146,7 @@ int BRPrivKeyIsValid(const char *privKey)
         r = (data[0] == 0);
     }
     else r = (strspn(privKey, "0123456789ABCDEFabcdef") == 64); // hex encoded key
-    
+
     mem_clean(data, sizeof(data));
     return r;
 }

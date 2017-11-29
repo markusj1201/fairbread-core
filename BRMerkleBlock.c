@@ -87,7 +87,7 @@ BRMerkleBlock *BRMerkleBlockNew(void)
 // returns a merkle block struct that must be freed by calling BRMerkleBlockFree()
 BRMerkleBlock *BRMerkleBlockParse(const uint8_t *buf, size_t bufLen)
 {
-    BRMerkleBlock *block = (buf && 80 <= bufLen) ? BRMerkleBlockNew() : NULL;
+    BRMerkleBlock *block = (buf && 108 <= bufLen) ? BRMerkleBlockNew() : NULL;
     size_t off = 0, len = 0;
     
     assert(buf != NULL || bufLen == 0);
@@ -99,11 +99,11 @@ BRMerkleBlock *BRMerkleBlockParse(const uint8_t *buf, size_t bufLen)
         off += sizeof(UInt256);
         block->merkleRoot = UInt256Get(&buf[off]);
         off += sizeof(UInt256);
+        block->payloadHash = UInt256Get(&buf[off]);
+        off += sizeof(UInt256);
         block->timestamp = UInt32GetLE(&buf[off]);
         off += sizeof(uint32_t);
-        block->target = UInt32GetLE(&buf[off]);
-        off += sizeof(uint32_t);
-        block->nonce = UInt32GetLE(&buf[off]);
+        block->creatorId = UInt32GetLE(&buf[off]);
         off += sizeof(uint32_t);
         
         if (off + sizeof(uint32_t) <= bufLen) {
@@ -122,7 +122,7 @@ BRMerkleBlock *BRMerkleBlockParse(const uint8_t *buf, size_t bufLen)
             if (block->flags) memcpy(block->flags, &buf[off], len);
         }
         
-        BRSHA256_2(&block->blockHash, buf, 80);
+        BRSHA256_2(&block->blockHash, buf, 108);
     }
     
     return block;
@@ -131,7 +131,7 @@ BRMerkleBlock *BRMerkleBlockParse(const uint8_t *buf, size_t bufLen)
 // returns number of bytes written to buf, or total bufLen needed if buf is NULL (block->height is not serialized)
 size_t BRMerkleBlockSerialize(const BRMerkleBlock *block, uint8_t *buf, size_t bufLen)
 {
-    size_t off = 0, len = 80;
+    size_t off = 0, len = 108;
     
     assert(block != NULL);
     
@@ -147,11 +147,11 @@ size_t BRMerkleBlockSerialize(const BRMerkleBlock *block, uint8_t *buf, size_t b
         off += sizeof(UInt256);
         UInt256Set(&buf[off], block->merkleRoot);
         off += sizeof(UInt256);
+        UInt256Set(&buf[off], block->payloadHash);
+        off += sizeof(UInt256);
         UInt32SetLE(&buf[off], block->timestamp);
         off += sizeof(uint32_t);
-        UInt32SetLE(&buf[off], block->target);
-        off += sizeof(uint32_t);
-        UInt32SetLE(&buf[off], block->nonce);
+        UInt32SetLE(&buf[off], block->creatorId);
         off += sizeof(uint32_t);
     
         if (block->totalTx > 0) {
@@ -259,8 +259,6 @@ int BRMerkleBlockIsValid(const BRMerkleBlock *block, uint32_t currentTime)
     
     // target is in "compact" format, where the most significant byte is the size of resulting value in bytes, the next
     // bit is the sign, and the remaining 23bits is the value after having been right shifted by (size - 3)*8 bits
-    static const uint32_t maxsize = MAX_PROOF_OF_WORK >> 24, maxtarget = MAX_PROOF_OF_WORK & 0x00ffffff;
-    const uint32_t size = block->target >> 24, target = block->target & 0x00ffffff;
     size_t hashIdx = 0, flagIdx = 0;
     UInt256 merkleRoot = _BRMerkleBlockRootR(block, &hashIdx, &flagIdx, 0), t = UINT256_ZERO;
     int r = 1;
@@ -270,18 +268,7 @@ int BRMerkleBlockIsValid(const BRMerkleBlock *block, uint32_t currentTime)
     
     // check if timestamp is too far in future
     if (block->timestamp > currentTime + BLOCK_MAX_TIME_DRIFT) r = 0;
-    
-    // check if proof-of-work target is out of range
-    if (target == 0 || target & 0x00800000 || size > maxsize || (size == maxsize && target > maxtarget)) r = 0;
-    
-    if (size > 3) UInt32SetLE(&t.u8[size - 3], target);
-    else UInt32SetLE(t.u8, target >> (3 - size)*8);
-    
-    for (int i = sizeof(t) - 1; r && i >= 0; i--) { // check proof-of-work
-        if (block->blockHash.u8[i] < t.u8[i]) break;
-        if (block->blockHash.u8[i] > t.u8[i]) r = 0;
-    }
-    
+
     return r;
 }
 
@@ -300,59 +287,10 @@ int BRMerkleBlockContainsTxHash(const BRMerkleBlock *block, UInt256 txHash)
     return r;
 }
 
-// verifies the block difficulty target is correct for the block's position in the chain
-// transitionTime is the timestamp of the block at the previous difficulty transition
-// transitionTime may be 0 if block->height is not a multiple of BLOCK_DIFFICULTY_INTERVAL
-//
-// The difficulty target algorithm works as follows:
-// The target must be the same as in the previous block unless the block's height is a multiple of 2016. Every 2016
-// blocks there is a difficulty transition where a new difficulty is calculated. The new target is the previous target
-// multiplied by the time between the last transition block's timestamp and this one (in seconds), divided by the
-// targeted time between transitions (14*24*60*60 seconds). If the new difficulty is more than 4x or less than 1/4 of
-// the previous difficulty, the change is limited to either 4x or 1/4. There is also a minimum difficulty value
-// intuitively named MAX_PROOF_OF_WORK... since larger values are less difficult.
-int BRMerkleBlockVerifyDifficulty(const BRMerkleBlock *block, const BRMerkleBlock *previous, uint32_t transitionTime)
+// TODO: implement
+int BRMerkleBlockVerifySignature(const BRMerkleBlock *block, const BRMerkleBlock *previous, uint32_t transitionTime)
 {
-    int r = 1;
-    
-    assert(block != NULL);
-    assert(previous != NULL);
-    
-    if (! previous || !UInt256Eq(block->prevBlock, previous->blockHash) || block->height != previous->height + 1) r = 0;
-    if (r && (block->height % BLOCK_DIFFICULTY_INTERVAL) == 0 && transitionTime == 0) r = 0;
-    
-#if BITCOIN_TESTNET
-    // TODO: implement testnet difficulty rule check
-    return r; // don't worry about difficulty on testnet for now
-#endif
-    
-    if (r && (block->height % BLOCK_DIFFICULTY_INTERVAL) == 0) {
-        // target is in "compact" format, where the most significant byte is the size of resulting value in bytes, next
-        // bit is the sign, and the remaining 23bits is the value after having been right shifted by (size - 3)*8 bits
-        static const uint32_t maxsize = MAX_PROOF_OF_WORK >> 24, maxtarget = MAX_PROOF_OF_WORK & 0x00ffffff;
-        int timespan = (int)((int64_t)previous->timestamp - (int64_t)transitionTime), size = previous->target >> 24;
-        uint64_t target = previous->target & 0x00ffffff;
-    
-        // limit difficulty transition to -75% or +400%
-        if (timespan < TARGET_TIMESPAN/4) timespan = TARGET_TIMESPAN/4;
-        if (timespan > TARGET_TIMESPAN*4) timespan = TARGET_TIMESPAN*4;
-    
-        // TARGET_TIMESPAN happens to be a multiple of 256, and since timespan is at least TARGET_TIMESPAN/4, we don't
-        // lose precision when target is multiplied by timespan and then divided by TARGET_TIMESPAN/256
-        target *= timespan;
-        target /= TARGET_TIMESPAN >> 8;
-        size--; // decrement size since we only divided by TARGET_TIMESPAN/256
-    
-        while (size < 1 || target > 0x007fffff) target >>= 8, size++; // normalize target for "compact" format
-    
-        // limit to MAX_PROOF_OF_WORK
-        if (size > maxsize || (size == maxsize && target > maxtarget)) target = maxtarget, size = maxsize;
-    
-        if (block->target != ((uint32_t)target | size << 24)) r = 0;
-    }
-    else if (r && block->target != previous->target) r = 0;
-    
-    return r;
+    return 1;
 }
 
 // frees memory allocated by BRMerkleBlockParse

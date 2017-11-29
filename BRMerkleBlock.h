@@ -42,9 +42,9 @@ typedef struct {
     uint32_t version;
     UInt256 prevBlock;
     UInt256 merkleRoot;
+    UInt256 payloadHash;
     uint32_t timestamp; // time interval since unix epoch
-    uint32_t target;
-    uint32_t nonce;
+    uint32_t creatorId;
     uint32_t totalTx;
     UInt256 *hashes;
     size_t hashesCount;
@@ -82,10 +82,8 @@ int BRMerkleBlockIsValid(const BRMerkleBlock *block, uint32_t currentTime);
 // true if the given tx hash is known to be included in the block
 int BRMerkleBlockContainsTxHash(const BRMerkleBlock *block, UInt256 txHash);
 
-// verifies the block difficulty target is correct for the block's position in the chain
-// transitionTime is the timestamp of the block at the previous difficulty transition
-// transitionTime may be 0 if block->height is not a multiple of BLOCK_DIFFICULTY_INTERVAL
-int BRMerkleBlockVerifyDifficulty(const BRMerkleBlock *block, const BRMerkleBlock *previous, uint32_t transitionTime);
+// verifies the block signature
+int BRMerkleBlockVerifySignature(const BRMerkleBlock *block, const BRMerkleBlock *previous, uint32_t transitionTime);
 
 // returns a hash value for block suitable for use in a hashtable
 inline static size_t BRMerkleBlockHash(const void *block)
